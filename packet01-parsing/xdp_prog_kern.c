@@ -13,7 +13,8 @@
 #include "../common/xdp_stats_kern.h"
 
 /* Header cursor to keep track of current parsing position */
-struct hdr_cursor {
+struct hdr_cursor
+{
 	void *pos;
 };
 
@@ -27,8 +28,8 @@ struct hdr_cursor {
  * All return values are in network byte order.
  */
 static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
-					void *data_end,
-					struct ethhdr **ethhdr)
+										void *data_end,
+										struct ethhdr **ethhdr)
 {
 	struct ethhdr *eth = nh->pos;
 	int hdrsize = sizeof(*eth);
@@ -36,7 +37,7 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
 	/* Byte-count bounds check; check if current pointer + size of header
 	 * is after data_end.
 	 */
-	if (nh->pos + 1 > data_end)
+	if (nh->pos + hdrsize > data_end)
 		return -1;
 
 	nh->pos += hdrsize;
@@ -46,21 +47,39 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
 }
 
 /* Assignment 2: Implement and use this */
-/*static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
-					void *data_end,
-					struct ipv6hdr **ip6hdr)
+static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
+										void *data_end,
+										struct ipv6hdr **ip6hdr)
 {
-}*/
+	struct ipv6hdr *ip6h = nh->pos;
+
+	if (ip6h + 1 > data_end)
+		return -1;
+
+	nh->pos = ip6h + 1;
+	*ip6hdr = ip6h;
+
+	return ip6h->nexthdr;
+}
 
 /* Assignment 3: Implement and use this */
-/*static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh,
-					  void *data_end,
-					  struct icmp6hdr **icmp6hdr)
+static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh,
+										  void *data_end,
+										  struct icmp6hdr **icmp6hdr)
 {
-}*/
+	struct icmp6hdr *icmp6h = nh->pos;
+
+	if (icmp6h + 1 > data_end)
+		return -1;
+
+	nh->pos = icmp6h + 1;
+	*icmp6hdr = icmp6h;
+
+	return icmp6h->icmp6_type;
+}
 
 SEC("xdp")
-int  xdp_parser_func(struct xdp_md *ctx)
+int xdp_parser_func(struct xdp_md *ctx)
 {
 	void *data_end = (void *)(long)ctx->data_end;
 	void *data = (void *)(long)ctx->data;
@@ -72,7 +91,7 @@ int  xdp_parser_func(struct xdp_md *ctx)
 	 */
 	__u32 action = XDP_PASS; /* Default action */
 
-        /* These keep track of the next header type and iterator pointer */
+	/* These keep track of the next header type and iterator pointer */
 	struct hdr_cursor nh;
 	int nh_type;
 
@@ -88,8 +107,27 @@ int  xdp_parser_func(struct xdp_md *ctx)
 		goto out;
 
 	/* Assignment additions go below here */
+	struct ipv6hdr *ip6h;
+	nh_type = parse_ip6hdr(&nh, data_end, &ip6h);
+	if (nh_type != IPPROTO_ICMPV6)
+		goto out;
 
-	action = XDP_DROP;
+	struct icmp6hdr *icmp6h;
+	int icmp_type = parse_icmp6hdr(&nh, data_end, &icmp6h);
+	if (icmp_type != ICMPV6_ECHO_REQUEST)
+		goto out;
+
+	bpf_printk("ICMPv6 sequence: %u", bpf_ntohs(icmp6h->icmp6_dataun.u_echo.sequence));
+	for (int i = 0; i < sizeof(ip6h->daddr.in6_u.u6_addr8) / sizeof(unsigned char); i += 2)
+	{
+		unsigned char front = ip6h->daddr.in6_u.u6_addr8[i];
+		unsigned char back = ip6h->daddr.in6_u.u6_addr8[i + 1];
+	
+		bpf_printk("%02x%02x", front, back);
+	}
+
+	if (bpf_ntohs(icmp6h->icmp6_sequence) % 2 == 0)
+		action = XDP_DROP;
 out:
 	return xdp_stats_record_action(ctx, action); /* read via xdp_stats */
 }
