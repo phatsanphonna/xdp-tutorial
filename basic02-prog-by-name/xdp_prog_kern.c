@@ -26,12 +26,12 @@ int xdp_drop_func(struct xdp_md *ctx)
         return XDP_DROP;
 }
 
+/* Assignment#2: Add new XDP program section that use XDP_ABORTED */
 SEC("xdp")
 int xdp_abort_func(struct xdp_md *ctx)
 {
         return XDP_ABORTED;
 }
-/* Assignment#2: Add new XDP program section that use XDP_ABORTED */
 
 char _license[] SEC("license") = "GPL";
 
