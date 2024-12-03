@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/bpf.h>
 #include <linux/in.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
@@ -40,7 +42,6 @@ static __always_inline int vlan_tag_pop(struct xdp_md *ctx, struct ethhdr *eth)
 
 	/* Copy back the old Ethernet header and update the proto type */
 
-
 	return vlid;
 }
 
@@ -48,7 +49,7 @@ static __always_inline int vlan_tag_pop(struct xdp_md *ctx, struct ethhdr *eth)
  * -1 on failure.
  */
 static __always_inline int vlan_tag_push(struct xdp_md *ctx,
-					 struct ethhdr *eth, int vlid)
+										 struct ethhdr *eth, int vlid)
 {
 	return 0;
 }
@@ -57,6 +58,35 @@ static __always_inline int vlan_tag_push(struct xdp_md *ctx,
 SEC("xdp")
 int xdp_port_rewrite_func(struct xdp_md *ctx)
 {
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+
+	struct hdr_cursor nh;
+	int nh_type;
+
+	nh.pos = data;
+
+	struct ethhdr *ethh;
+	nh_type = parse_ethhdr(&nh, data_end, &ethh);
+	if (nh_type != bpf_ntohs(ETH_P_IPV6))
+		return XDP_PASS;
+
+	struct ipv6hdr *ip6h;
+	nh_type = parse_ip6hdr(&nh, data_end, &ip6h);
+	if (nh_type != IPPROTO_UDP)
+		return XDP_PASS;
+
+	struct udphdr *udph;
+	if (parse_udphdr(&nh, data_end, &udph) < 0)
+	{
+		return XDP_ABORTED;
+	}
+
+	udph->dest = bpf_htons(bpf_ntohs(udph->dest) - 1);
+	udph->check += bpf_htons(1);
+	if (!udph->check)
+		udph->check += bpf_htons(1);
+
 	return XDP_PASS;
 }
 
@@ -92,7 +122,7 @@ int xdp_vlan_swap_func(struct xdp_md *ctx)
  * IP (via the helpers in parsing_helpers.h).
  */
 SEC("xdp")
-int  xdp_parser_func(struct xdp_md *ctx)
+int xdp_parser_func(struct xdp_md *ctx)
 {
 	void *data_end = (void *)(long)ctx->data_end;
 	void *data = (void *)(long)ctx->data;
@@ -116,7 +146,8 @@ int  xdp_parser_func(struct xdp_md *ctx)
 	 */
 	nh_type = parse_ethhdr(&nh, data_end, &eth);
 
-	if (nh_type == bpf_htons(ETH_P_IPV6)) {
+	if (nh_type == bpf_htons(ETH_P_IPV6))
+	{
 		struct ipv6hdr *ip6h;
 		struct icmp6hdr *icmp6h;
 
@@ -130,8 +161,9 @@ int  xdp_parser_func(struct xdp_md *ctx)
 
 		if (bpf_ntohs(icmp6h->icmp6_sequence) % 2 == 0)
 			action = XDP_DROP;
-
-	} else if (nh_type == bpf_htons(ETH_P_IP)) {
+	}
+	else if (nh_type == bpf_htons(ETH_P_IP))
+	{
 		struct iphdr *iph;
 		struct icmphdr *icmph;
 
@@ -146,7 +178,7 @@ int  xdp_parser_func(struct xdp_md *ctx)
 		if (bpf_ntohs(icmph->un.echo.sequence) % 2 == 0)
 			action = XDP_DROP;
 	}
- out:
+out:
 	return xdp_stats_record_action(ctx, action);
 }
 

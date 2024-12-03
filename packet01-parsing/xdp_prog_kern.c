@@ -20,6 +20,11 @@ struct hdr_cursor
 	void *pos;
 };
 
+struct vlan_hdr {
+	__be16	h_vlan_TCI;
+	__be16	h_vlan_encapsulated_proto;
+};
+
 /* Packet parsing helpers.
  *
  * Each helper parses a packet header, including doing bounds checking, and
@@ -108,6 +113,12 @@ static __always_inline int parse_icmp4hdr(struct hdr_cursor *nh,
 	*icmphdr = icmph;
 
 	return icmph->type;
+}
+
+static __always_inline int proto_is_vlan(__u16 h_proto)
+{
+        return !!(h_proto == bpf_htons(ETH_P_8021Q) ||
+                  h_proto == bpf_htons(ETH_P_8021AD));
 }
 
 SEC("xdp")
