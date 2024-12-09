@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "time.h": "c",
-        "ipv6.h": "c"
+        "ipv6.h": "c",
+        "parsing_helpers.h": "c",
+        "bpf.h": "c"
     }
 }

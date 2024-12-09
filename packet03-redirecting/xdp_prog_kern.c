@@ -44,9 +44,9 @@ static __always_inline __u16 csum_fold_helper(__u32 csum)
 }
 
 static __always_inline __u16 icmp_checksum_diff(
-		__u16 seed,
-		struct icmphdr_common *icmphdr_new,
-		struct icmphdr_common *icmphdr_old)
+	__u16 seed,
+	struct icmphdr_common *icmphdr_new,
+	struct icmphdr_common *icmphdr_old)
 {
 	__u32 csum, size = sizeof(struct icmphdr_common);
 
@@ -193,8 +193,8 @@ int xdp_redirect_func(struct xdp_md *ctx)
 	struct ethhdr *eth;
 	int eth_type;
 	int action = XDP_PASS;
-	unsigned char dst[ETH_ALEN] = {0x92, 0xbf, 0x44, 0x35, 0x82, 0x78};   /* Assignment 2: fill in with the MAC address of the left inner interface */
-	unsigned ifindex = 2;			   /* Assignment 2: fill in with the ifindex of the left interface */
+	unsigned char dst[ETH_ALEN] = {0x92, 0xbf, 0x44, 0x35, 0x82, 0x78}; /* Assignment 2: fill in with the MAC address of the left inner interface */
+	unsigned ifindex = 2;												/* Assignment 2: fill in with the ifindex of the left interface */
 
 	/* These keep track of the next header type and iterator pointer */
 	nh.pos = data;
@@ -243,6 +243,8 @@ int xdp_redirect_map_func(struct xdp_md *ctx)
 
 	/* Set a proper destination address */
 	memcpy(eth->h_dest, dst, ETH_ALEN);
+
+	/* Redirect by map of index key */
 	action = bpf_redirect_map(&tx_port, 0, 0);
 
 out:
@@ -253,6 +255,9 @@ out:
 static __always_inline int ip_decrease_ttl(struct iphdr *iph)
 {
 	/* Assignment 4: see samples/bpf/xdp_fwd_kern.c from the kernel */
+	__u32 check = iph->check;
+	check += bpf_htons(0x0100);
+	iph->check = (__u16)(check + (check >= 0xFFFF));
 	return --iph->ttl;
 }
 
@@ -301,13 +306,12 @@ int xdp_router_func(struct xdp_md *ctx)
 		fib_params.dport = 0;
 		fib_params.tos = iph->tos;
 		fib_params.tot_len = bpf_ntohs(iph->tot_len);
-
 	}
 	else if (h_proto == bpf_htons(ETH_P_IPV6))
 	{
 		/* These pointers can be used to assign structures instead of executing memcpy: */
-		struct in6_addr *src = (struct in6_addr *) fib_params.ipv6_src;
-		struct in6_addr *dst = (struct in6_addr *) fib_params.ipv6_dst;
+		struct in6_addr *src = (struct in6_addr *)fib_params.ipv6_src;
+		struct in6_addr *dst = (struct in6_addr *)fib_params.ipv6_dst;
 
 		ip6h = data + nh_off;
 		if (ip6h + 1 > data_end)
@@ -321,7 +325,7 @@ int xdp_router_func(struct xdp_md *ctx)
 
 		/* Assignment 4: fill the fib_params structure for the AF_INET6 case */
 		fib_params.family = AF_INET6;
-		fib_params.flowinfo = *(__be32 *) ip6h & IPV6_FLOWINFO_MASK;
+		fib_params.flowinfo = *(__be32 *)ip6h & IPV6_FLOWINFO_MASK;
 		*src = ip6h->saddr;
 		*dst = ip6h->daddr;
 		fib_params.sport = 0;
@@ -336,6 +340,7 @@ int xdp_router_func(struct xdp_md *ctx)
 
 	fib_params.ifindex = ctx->ingress_ifindex;
 
+	/* bpf_fib_lookup will populate source mac address and destination mac address here */
 	rc = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
 	switch (rc)
 	{
